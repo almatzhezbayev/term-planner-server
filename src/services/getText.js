@@ -23,6 +23,7 @@ async function getText(path) {
     console.log("[getText] Extraction finished");
     console.log("[getText] Pages:", result.numpages);
     console.log("[getText] Text length:", result.text.length);
+    console.log("[getText] Text:", result.text);
 
     return result.text;
   } catch (err) {
