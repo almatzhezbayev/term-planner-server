@@ -4,7 +4,7 @@ The parser extracts information from the transcript PDF and returns a normalized
 
 Example:
 
-~~~javascript
+```javascript
 {
   admitTerm: "22-23f",
   school: "science",
@@ -16,16 +16,16 @@ Example:
     "23-24f": ["COMP2011", "MATH2023"]
   }
 }
-~~~
+```
 
 Fields:
 
-| Field | Description |
-|---|---|
+| Field       | Description                          |
+| ----------- | ------------------------------------ |
 | `admitTerm` | admission semester (`YY-YYt` format) |
-| `school` | student's school |
-| `major` | major identifier |
-| `semesters` | mapping of semester → courses taken |
+| `school`    | student's school                     |
+| `major`     | major identifier                     |
+| `semesters` | mapping of semester → courses taken  |
 
 Semesters are sorted chronologically.
 
@@ -47,55 +47,55 @@ There are four node types.
 
 All child nodes must be satisfied.
 
-~~~javascript
+```javascript
 {
   type: "and",
   nodes: [...]
 }
-~~~
+```
 
 ### 2. OR node
 
 At least one child node must be satisfied.
 
-~~~javascript
+```javascript
 {
   type: "or",
   nodes: [...]
 }
-~~~
+```
 
 ### 3. Course List leaf node
 
 Represents a requirement to take `count` courses from a specific list.
 
-~~~javascript
+```javascript
 {
   courses: ["COURSE1", "COURSE2", "COURSE3"],
   count: 2
 }
-~~~
+```
 
 Meaning:
 
-~~~text
+```text
 take at least 2 courses from the list
-~~~
+```
 
 Common patterns:
 
-| Pattern | Representation |
-|---|---|
-| required course | `{ courses: ["A"], count: 1 }` |
-| A OR B | `{ courses: ["A", "B"], count: 1 }` |
-| choose 2 of 3 | `{ courses: ["A", "B", "C"], count: 2 }` |
+| Pattern              | Representation                           |
+| -------------------- | ---------------------------------------- |
+| required course      | `{ courses: ["A"], count: 1 }`           |
+| A OR B               | `{ courses: ["A", "B"], count: 1 }`      |
+| choose 2 of 3        | `{ courses: ["A", "B", "C"], count: 2 }` |
 | all courses required | `{ courses: ["A", "B", "C"], count: 3 }` |
 
 ### 4. Elective leaf node
 
 Represents electives defined by department code and course level.
 
-~~~javascript
+```javascript
 {
   elective: {
     code: "MATH",
@@ -103,13 +103,13 @@ Represents electives defined by department code and course level.
   },
   count: 2
 }
-~~~
+```
 
 Meaning:
 
-~~~text
+```text
 take 2 MATH courses numbered 3000 or above
-~~~
+```
 
 ---
 
@@ -117,13 +117,13 @@ take 2 MATH courses numbered 3000 or above
 
 Formally, the node schema is:
 
-~~~text
+```text
 node =
     { type: "and", nodes: node[] }
   | { type: "or", nodes: node[] }
   | { courses: string[], count: number }
   | { elective: { code: string, level: number }, count: number }
-~~~
+```
 
 ---
 
@@ -136,21 +136,21 @@ nodes form a tree, where:
 
 Example:
 
-~~~text
+```text
 OR
 ├── AND
 │   ├── courses: [MATH1012, MATH1013], count: 1
 │   └── courses: [MATH1014, MATH1024], count: 1
 └── courses: [MATH1020], count: 1
-~~~
+```
 
 This corresponds to:
 
-~~~text
+```text
 (MATH1012 OR MATH1013) AND (MATH1014 OR MATH1024)
 OR
 MATH1020
-~~~
+```
 
 ---
 
@@ -158,7 +158,7 @@ MATH1020
 
 Example node for a program requirement:
 
-~~~javascript
+```javascript
 type: "and",
 rules: [
   { courses: ["MATH2343", "MATH3121", "COMP2611"], count: 3 },
@@ -219,11 +219,11 @@ rules: [
     count: 1,
   },
 ],
-~~~
+```
 
 This encodes the requirement:
 
-~~~text
+```text
 (MATH2343) AND (MATH3121) AND (COMP2611)
 AND
 (COMP3711 OR COMP3711H)
@@ -235,6 +235,12 @@ AND
 )
 AND
 (MATH3000+ elective) AND (two MATH electives) AND (COMP4000+ elective)
-~~~
+```
 
 ---
+
+assumptions:
+
+requirements no matter the year will always contain latest course names (i.e. if in past course was called chem1020, and now is called chem1051, student's transcript may contain chem1020 however requirements will have updated courses name chem1051 always even those requirements were at the time when new name wasn't existing)
+
+new name is the source of truth and student transcript will allways be normalized to new names

@@ -260,12 +260,12 @@ const math = {
       },
     },
 
-    "math-pm": {
+    "math-pma": {
       req: {
         type: "and",
         rules: [
           { courses: ["MATH2001", "MATH3131", "MATH4225"], count: 3 },
-          { courses: ["MATH4991", "MATH4991"], count: 1 },
+          { courses: ["MATH4991", "MATH4999"], count: 1 },
           {
             type: "and",
             rules: [
@@ -318,36 +318,47 @@ const math = {
           },
         ],
       },
-
-      capstone: {
-        courses: ["MATH4991", "MATH4999"],
-        count: 1,
-      },
     },
 
-    "math-pma": {
-      required: {
-        courses: ["MATH2001", "MATH3131", "MATH4225"],
-        count: 3,
-      },
-
-      capstone: {
-        courses: ["MATH4991", "MATH4999"],
-        count: 1,
-      },
-
-      depth: {
-        courses: [
-          "MATH4141",
-          "MATH4151",
-          "MATH4023",
-          "MATH4051",
-          "MATH4052",
-          "MATH4033",
-          "MATH4221",
-          "MATH4223",
+    "math-pm": {
+      req: {
+        type: "and",
+        rules: [
+          { courses: ["MATH2001", "MATH3131", "MATH4225"], count: 3 },
+          { courses: ["MATH4991", "MATH4999"], count: 1 },
+          {
+            elec: {
+              code: "MATH",
+              lvl: 2000,
+            },
+            count: 2,
+          },
+          {
+            courses: [
+              "MATH2343",
+              "MATH2352",
+              "MATH2411",
+              "MATH3312",
+              "MATH3343",
+              "MATH4321",
+              "MATH4326",
+              "MATH4343",
+            ],
+            count: 1,
+          },
+          {
+            courses: ["MATH4023", "MATH4051", "MATH4052"],
+            count: 1,
+          },
+          {
+            courses: ["MATH4033", "MATH4221", "MATH4223"],
+            count: 1,
+          },
+          {
+            courses: ["MATH4141", "MATH4151"],
+            count: 1,
+          },
         ],
-        count: 4,
       },
     },
 
@@ -383,3 +394,78 @@ const math = {
 };
 
 module.exports = math;
+
+// reference: https://ugadmin.hkust.edu.hk/prog_crs/ug/202223/pdf/22-23math.pdf
+const MATH_CS = {
+  prereq: {
+    regularPath: {
+      calcI: new Set(["MATH1012", "MATH1013", "MATH1023"]),
+      calcII: new Set(["MATH1014", "MATH1024"]),
+    },
+    acceleratedPath: new Set(["MATH1020"]),
+  },
+
+  core: {
+    multivar: new Set(["MATH2023"]),
+    analysis: new Set(["MATH2033", "MATH2043"]),
+    linear: new Set(["MATH2121", "MATH2131"]),
+    real: new Set(["MATH3033", "MATH3043"]),
+    lang: new Set(["LANG3021", "LANG3027"]),
+  },
+
+  trackRequired: {
+    discrete: new Set(["MATH2343"]),
+    abstractAlgebra: new Set(["MATH3121"]),
+    capstone: new Set(["MATH4991", "MATH4992", "MATH4999"]),
+
+    // (COMP2011 AND COMP2012) OR COMP2012H
+    compCore: {
+      regularPath: {
+        comp2011: new Set(["COMP2011"]),
+        comp2012: new Set(["COMP2012"]),
+      },
+      honorsPath: new Set(["COMP2012H"]),
+    },
+
+    compOrg: new Set(["COMP2611"]),
+    algo: new Set(["COMP3711", "COMP3711H"]),
+  },
+
+  // remaining elective counts
+  electiveNeeds: {
+    math3000PlusNeed: 1,
+    mathListedNeed: 2,
+    comp4000PlusNeed: 1,
+    comp2000PlusNeed: 0, // becomes 1 only if COMP2012H path is used
+    compListedNeed: 1,
+  },
+
+  // elective pools
+  electivePools: {
+    mathListed: new Set([
+      "MATH2001",
+      "MATH2411",
+      "MATH2421",
+      "MATH2431",
+      "MATH3312",
+      "MATH3322",
+      "MATH3332",
+      "MATH3343",
+      "MATH4023",
+      "MATH4141",
+      "MATH4223",
+      "MATH4321",
+      "MATH4343",
+    ]),
+    compListed: new Set([
+      "COMP3031",
+      "COMP3111",
+      "COMP3111H",
+      "COMP3211",
+      "COMP3311",
+      "COMP3511",
+    ]),
+  },
+};
+
+module.exports = MATH_CS;
