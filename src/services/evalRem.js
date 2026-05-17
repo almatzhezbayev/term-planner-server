@@ -1,18 +1,4 @@
-const evalRem = (courses, admitTerm, school, major) => {
-  const SREQ = require(
-    `../requirements/${admitTerm.slice(0, -1)}/${school}/SREQ`,
-  );
-
-  const majorReqs = require(
-    `../requirements/${admitTerm.slice(0, -1)}/${school}/${major.slice(0, -3)}`,
-  );
-
-  // console.log(evalSchool(courses, SREQ));
-
-  // evalMajor(courses, majorReqs);
-};
-
-// evaluator for major requirements
+const courseAliases = require("../requirements/course_equivalents");
 
 const pickTaken = (options, takenSet) => {
   for (const course of options) {
@@ -62,12 +48,20 @@ const matchElectiveSlots = (courses, slots) => {
     return false;
   };
 
-  for (let i = 0; i < courses.length; i++) {
+  for (let i = 0; i < courses.length; i += 1) {
     dfs(i, Array(slots.length).fill(false));
   }
 
   return slotToCourse;
 };
+
+const setToSortedArray = (set) => [...set].sort();
+
+// const normalizeCourses = (courses) =>
+//   [...new Set(courses.map((course) => courseAliases[course] ?? course))];
+const normalizeCourses = (courses) => [
+  ...new Set(courses.map((course) => course)),
+];
 
 const evalMajor = (courses, req) => {
   const progress = {
@@ -77,16 +71,10 @@ const evalMajor = (courses, req) => {
     electives: structuredClone(req.electiveNeeds),
   };
 
-  // do not double count repeated courses
-  const uniqueCourses = [...new Set(courses)];
+  const uniqueCourses = normalizeCourses(courses);
   const takenSet = new Set(uniqueCourses);
-
-  // courses already consumed by required buckets should not be reused for electives
   const used = new Set();
 
-  // -----------------------------
-  // prerequisite
-  // -----------------------------
   if (takenSet.has("MATH1020")) {
     clearAllSets(progress.prereq);
     used.add("MATH1020");
@@ -104,9 +92,6 @@ const evalMajor = (courses, req) => {
     }
   }
 
-  // -----------------------------
-  // common major core
-  // -----------------------------
   for (const key of ["multivar", "analysis", "linear", "real", "lang"]) {
     const taken = pickTaken(req.core[key], takenSet);
     if (taken) {
@@ -115,9 +100,6 @@ const evalMajor = (courses, req) => {
     }
   }
 
-  // -----------------------------
-  // track required courses
-  // -----------------------------
   for (const key of [
     "discrete",
     "abstractAlgebra",
@@ -132,7 +114,6 @@ const evalMajor = (courses, req) => {
     }
   }
 
-  // COMP core: prefer regular path if both exist, because that avoids extra COMP 2000+ elective
   const hasRegularCompCore =
     takenSet.has("COMP2011") && takenSet.has("COMP2012");
   const hasHonorsCompCore = takenSet.has("COMP2012H");
@@ -149,47 +130,46 @@ const evalMajor = (courses, req) => {
   } else {
     if (takenSet.has("COMP2011")) {
       progress.trackRequired.compCore.regularPath.comp2011.clear();
+      used.add("COMP2011");
     }
     if (takenSet.has("COMP2012")) {
       progress.trackRequired.compCore.regularPath.comp2012.clear();
+      used.add("COMP2012");
     }
   }
 
-  // -----------------------------
-  // electives
-  // -----------------------------
   const remainingPool = uniqueCourses.filter((course) => !used.has(course));
   const slots = [];
 
-  for (let i = 0; i < progress.electives.mathListedNeed; i++) {
+  for (let i = 0; i < progress.electives.mathListedNeed; i += 1) {
     slots.push({
       key: "mathListedNeed",
       predicate: (course) => req.electivePools.mathListed.has(course),
     });
   }
 
-  for (let i = 0; i < progress.electives.math3000PlusNeed; i++) {
+  for (let i = 0; i < progress.electives.math3000PlusNeed; i += 1) {
     slots.push({
       key: "math3000PlusNeed",
       predicate: (course) => isSubjectLevel(course, "MATH", 3000),
     });
   }
 
-  for (let i = 0; i < progress.electives.compListedNeed; i++) {
+  for (let i = 0; i < progress.electives.compListedNeed; i += 1) {
     slots.push({
       key: "compListedNeed",
       predicate: (course) => req.electivePools.compListed.has(course),
     });
   }
 
-  for (let i = 0; i < progress.electives.comp4000PlusNeed; i++) {
+  for (let i = 0; i < progress.electives.comp4000PlusNeed; i += 1) {
     slots.push({
       key: "comp4000PlusNeed",
       predicate: (course) => isSubjectLevel(course, "COMP", 4000),
     });
   }
 
-  for (let i = 0; i < progress.electives.comp2000PlusNeed; i++) {
+  for (let i = 0; i < progress.electives.comp2000PlusNeed; i += 1) {
     slots.push({
       key: "comp2000PlusNeed",
       predicate: (course) => isSubjectLevel(course, "COMP", 2000),
@@ -198,7 +178,7 @@ const evalMajor = (courses, req) => {
 
   const slotToCourse = matchElectiveSlots(remainingPool, slots);
 
-  for (let i = 0; i < slotToCourse.length; i++) {
+  for (let i = 0; i < slotToCourse.length; i += 1) {
     if (slotToCourse[i] !== -1) {
       progress.electives[slots[i].key] -= 1;
     }
@@ -207,23 +187,19 @@ const evalMajor = (courses, req) => {
   return progress;
 };
 
-module.exports = evalMajor;
-
-// supposed to be called with (courses = list of strings with taken courses, progress = SREQ)
 const evalSchool = (courses, SREQ) => {
   const progress = structuredClone(SREQ);
-  for (const course of courses) {
-    // check for COMP
-    if (progress.COMP.size != 0 && progress.COMP.has(course)) {
+  const uniqueCourses = normalizeCourses(courses);
+
+  for (const course of uniqueCourses) {
+    if (progress.COMP.size !== 0 && progress.COMP.has(course)) {
       progress.COMP.clear();
     }
 
-    // check for LANG
-    if (progress.LANG.size != 0 && progress.LANG.has(course)) {
+    if (progress.LANG.size !== 0 && progress.LANG.has(course)) {
       progress.LANG.clear();
     }
 
-    // check for foundations lectures
     for (const discipline of ["CHEM", "LIFS", "MATH", "PHYS"]) {
       if (
         progress.lecs[discipline].has(course) &&
@@ -236,84 +212,244 @@ const evalSchool = (courses, SREQ) => {
       }
     }
 
-    if (progress.LABS.size != 0 && progress.LABS.has(course)) {
+    if (progress.LABS.size !== 0 && progress.LABS.has(course)) {
       progress.LABS.clear();
     }
   }
+
   return progress;
 };
 
-// args
-const courses = [
-  "COMP2011",
-  "HUMA1102",
-  "LANG2010H",
-  "MATH2023",
-  "MATH2121",
-  "CHEM1020",
-  "CHEM1050",
-  "CORE1901",
-  "CORE1905A",
-  "LIFS1902",
-  "MATH1012",
-  "CORE1402",
-  "CHEM1030",
-  "CHEM1055",
-  "COMP1022P",
-  "CORE1404",
-  "CORE1905A",
-  "LEGL1000",
-  "LIFS1904",
-  "MATH1014",
-  "COMP2012",
-  "COMP2611",
-  "ECON1220",
-  "LIFS2040",
-  "PHYS1101",
-  "COMP2711",
-  "ELEC1010",
-  "MATH2001",
-  "MATH2421",
-  "MATH3121",
-  "COMP3511",
-  "COMP3711",
-  "HUMA2588",
-  "LANG1411",
-  "MATH2033",
-  "SOSC1860",
-  "COMP4211",
-  "COMP4651",
-  "MATH3033",
-  "MATH3322",
-  "MATH4999",
-];
+const majorCategoriesFromProgress = (progress, req) => {
+  const categories = [];
 
-const admitTerm = "22-23f";
-const school = "science";
-const major = "math-cs";
+  if (progress.prereq.regularPath.calcI.size > 0) {
+    categories.push({
+      id: "major.prereq.calcI",
+      label: "Prerequisite: Calculus I",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.prereq.regularPath.calcI),
+    });
+  }
 
-evalRem(courses, admitTerm, school, major);
+  if (progress.prereq.regularPath.calcII.size > 0) {
+    categories.push({
+      id: "major.prereq.calcII",
+      label: "Prerequisite: Calculus II",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.prereq.regularPath.calcII),
+    });
+  }
 
-// progress.COMP = false
-// progress.LANG = false
-// progress.foundations.lab = false
-// progress.foundations.lectureTotal = 0
-// progress.foundations.byDiscipline = { CHEM: 0, LIFS: 0, MATH: 0, PHYS: 0 }
+  const coreLabels = {
+    multivar: "Core: Multivariable calculus",
+    analysis: "Core: Analysis",
+    linear: "Core: Linear algebra",
+    real: "Core: Real analysis",
+    lang: "Core: Advanced language course",
+  };
 
-// FOR each course in courses:
+  for (const [key, label] of Object.entries(coreLabels)) {
+    if (progress.core[key].size > 0) {
+      categories.push({
+        id: `major.core.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.core[key]),
+      });
+    }
+  }
 
-//     IF lookup.COMP has course:
-//         progress.COMP = true
+  const trackLabels = {
+    discrete: "Track required: Discrete mathematics",
+    abstractAlgebra: "Track required: Abstract algebra",
+    capstone: "Track required: Capstone",
+    compOrg: "Track required: Computer organization",
+    algo: "Track required: Algorithms",
+  };
 
-//     IF lookup.LANG has course:
-//         progress.LANG = true
+  for (const [key, label] of Object.entries(trackLabels)) {
+    if (progress.trackRequired[key].size > 0) {
+      categories.push({
+        id: `major.track.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.trackRequired[key]),
+      });
+    }
+  }
 
-//     IF lookup.foundationLabs has course:
-//         progress.foundations.lab = true
+  const missingComp2011 =
+    progress.trackRequired.compCore.regularPath.comp2011.size > 0;
+  const missingComp2012 =
+    progress.trackRequired.compCore.regularPath.comp2012.size > 0;
 
-//     IF course exists in lookup.foundationLectureMap:
-//         discipline = lookup.foundationLectureMap[course]
+  if (missingComp2011 || missingComp2012) {
+    categories.push({
+      id: "major.track.compCore",
+      label: "Track required: COMP programming core",
+      kind: "course-options",
+      remainingCount: Number(missingComp2011) + Number(missingComp2012),
+      options: [
+        ...setToSortedArray(
+          progress.trackRequired.compCore.regularPath.comp2011,
+        ),
+        ...setToSortedArray(
+          progress.trackRequired.compCore.regularPath.comp2012,
+        ),
+      ],
+      note: "COMP2012H also satisfies the alternative honors path.",
+    });
+  }
 
-//         IF progress.foundations.byDiscipline[discipline] < 3:
-//             progress.foundations.byDiscipline[discipline] += 1
-//             progress.foundations.lectureTotal += 1
+  const electiveRules = [
+    {
+      id: "major.elective.mathListed",
+      label: "Math listed electives",
+      remainingCount: progress.electives.mathListedNeed,
+      options: setToSortedArray(req.electivePools.mathListed),
+    },
+    {
+      id: "major.elective.math3000Plus",
+      label: "MATH electives at 3000-level or above",
+      remainingCount: progress.electives.math3000PlusNeed,
+      rule: "Any MATH course numbered 3000 or above.",
+    },
+    {
+      id: "major.elective.compListed",
+      label: "COMP listed electives",
+      remainingCount: progress.electives.compListedNeed,
+      options: setToSortedArray(req.electivePools.compListed),
+    },
+    {
+      id: "major.elective.comp4000Plus",
+      label: "COMP electives at 4000-level or above",
+      remainingCount: progress.electives.comp4000PlusNeed,
+      rule: "Any COMP course numbered 4000 or above.",
+    },
+    {
+      id: "major.elective.comp2000Plus",
+      label: "Additional COMP elective at 2000-level or above",
+      remainingCount: progress.electives.comp2000PlusNeed,
+      rule: "Needed only when the COMP2012H honors path is used for the programming core.",
+    },
+  ];
+
+  for (const rule of electiveRules) {
+    if (rule.remainingCount > 0) {
+      categories.push({
+        id: rule.id,
+        label: rule.label,
+        kind: "count-only",
+        remainingCount: rule.remainingCount,
+        options: rule.options,
+        rule: rule.rule,
+      });
+    }
+  }
+
+  return categories;
+};
+
+const schoolCategoriesFromProgress = (progress) => {
+  const categories = [];
+
+  if (progress.COMP.size > 0) {
+    categories.push({
+      id: "school.comp",
+      label: "School common COMP requirement",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.COMP),
+    });
+  }
+
+  if (progress.LANG.size > 0) {
+    categories.push({
+      id: "school.lang",
+      label: "School common LANG requirement",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.LANG),
+    });
+  }
+
+  if (progress.lecNeed > 0) {
+    const disciplineSummary = Object.entries(progress.lecCount)
+      .map(
+        ([discipline, count]) => `${discipline}: ${count}/${progress.lecCap}`,
+      )
+      .join(", ");
+
+    categories.push({
+      id: "school.foundationLectures",
+      label: "Science foundation lecture courses",
+      kind: "count-only",
+      remainingCount: progress.lecNeed,
+      rule: "Take eligible CHEM, LIFS, MATH, or PHYS lecture courses, with at most 3 counted from each discipline.",
+      note: `Current counted lectures by discipline: ${disciplineSummary}.`,
+    });
+  }
+
+  if (progress.LABS.size > 0) {
+    categories.push({
+      id: "school.foundationLab",
+      label: "Science foundation lab course",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.LABS),
+    });
+  }
+
+  return categories;
+};
+
+const buildRecommendations = (categories) =>
+  categories.map((category) => ({
+    id: category.id,
+    label: category.label,
+    remainingCount: category.remainingCount,
+    options: category.options ?? [],
+    rule: category.rule,
+    note: category.note,
+  }));
+
+function evalRem({ courses, admitTerm, school, major }) {
+  const reqYear = admitTerm.slice(0, -1);
+  const schoolReq = require(`../requirements/${reqYear}/${school}/SREQ`);
+  const majorReq = require(`../requirements/${reqYear}/${school}/math`);
+
+  if (major !== "math-cs") {
+    throw new Error(
+      `Remaining-requirement evaluation is currently implemented for major '${major}' only.`,
+    );
+  }
+
+  const schoolProgress = evalSchool(courses, schoolReq);
+  const majorProgress = evalMajor(courses, majorReq);
+
+  const schoolCategories = schoolCategoriesFromProgress(schoolProgress);
+  const majorCategories = majorCategoriesFromProgress(majorProgress, majorReq);
+  const categories = [...schoolCategories, ...majorCategories];
+
+  return {
+    summary: {
+      remainingBucketCount: categories.length,
+      totalRemainingCourseCount: categories.reduce(
+        (sum, category) => sum + category.remainingCount,
+        0,
+      ),
+    },
+    remaining: {
+      school: schoolCategories,
+      major: majorCategories,
+    },
+    recommendations: buildRecommendations(categories),
+  };
+}
+
+module.exports = evalRem;

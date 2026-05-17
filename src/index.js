@@ -54,22 +54,19 @@ app.post("/api/requirements", async (req, res) => {
       });
     }
 
-    const courses = Set(Object.values(semesters || {}).flat());
+    const courses = Object.values(semesters || {})
+      .filter(Array.isArray)
+      .flat()
+      .filter((course) => typeof course === "string" && course.trim() !== "");
 
-    const rem = evalRem({
+    const requirements = evalRem({
       courses,
       admitTerm,
       school,
       major,
     });
-
-    res.json({
-      // school,
-      // major,
-      // admitTerm,
-      // semesters,
-      rem,
-    });
+    console.log(JSON.stringify(requirements, null, 2));
+    res.json(requirements);
   } catch (err) {
     res.status(500).json({
       error: "Failed to evaluate remaining requirements:" + err.message,

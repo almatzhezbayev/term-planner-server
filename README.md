@@ -1,246 +1,135 @@
-## Parser Output
+# term-planner-server
 
-The parser extracts information from the transcript PDF and returns a normalized object.
+Express backend for transcript parsing and remaining-requirement evaluation.
 
-Example:
+## Run
 
-```javascript
+```bash
+npm install
+npm run dev
+```
+
+The server starts on `http://localhost:3001`.
+
+## Current API
+
+### `POST /api/parse`
+
+Parses a transcript PDF sent as raw request body.
+
+- Content type: `application/pdf`
+- Body: raw PDF bytes
+- Response:
+
+```json
 {
-  admitTerm: "22-23f",
-  school: "science",
-  major: "math-cs",
-
-  semesters: {
-    "22-23f": ["CHEM1020", "CHEM1050", "MATH1012"],
-    "22-23s": ["MATH1014", "COMP1022P"],
-    "23-24f": ["COMP2011", "MATH2023"]
+  "school": "science",
+  "major": "math-cs",
+  "admitTerm": "22-23f",
+  "semesters": {
+    "22-23f": ["CHEM1020", "CHEM1050", "MATH1012"]
   }
 }
 ```
 
-Fields:
+What happens internally:
 
-| Field       | Description                          |
-| ----------- | ------------------------------------ |
-| `admitTerm` | admission semester (`YY-YYt` format) |
-| `school`    | student's school                     |
-| `major`     | major identifier                     |
-| `semesters` | mapping of semester → courses taken  |
+1. `src/services/getText.js` extracts plain text from the uploaded PDF using `pdf-parse`.
+2. `src/services/parse.js` reads that text and derives:
+   - `admitTerm` from the transcript `Admit Date`
+   - `major` from the `Major:` line
+   - `school` from the `School of ...` line
+   - `semesters` by scanning transcript term headers and course codes
+3. Courses on transcript lines ending with `F` are skipped, so failed courses are not counted.
 
-Semesters are sorted chronologically.
+### `POST /api/requirements`
 
----
+Evaluates remaining requirements from already parsed or user-edited transcript data.
 
-## Requirement Tree Node schema
+- Content type: `application/json`
+- Body:
 
-Program requirements are represented as a **heterogeneous tree**.
-
-Each node represents a logical constraint on courses.
-
----
-
-## Node Types
-
-There are four node types.
-
-### 1. AND node
-
-All child nodes must be satisfied.
-
-```javascript
+```json
 {
-  type: "and",
-  nodes: [...]
+  "school": "science",
+  "major": "math-cs",
+  "admitTerm": "22-23f",
+  "semesters": {
+    "22-23f": ["CHEM1020", "CHEM1050", "MATH1012"],
+    "22-23s": ["MATH1014", "COMP1022P"]
+  }
 }
 ```
 
-### 2. OR node
+- Response:
 
-At least one child node must be satisfied.
-
-```javascript
+```json
 {
-  type: "or",
-  nodes: [...]
-}
-```
-
-### 3. Course List leaf node
-
-Represents a requirement to take `count` courses from a specific list.
-
-```javascript
-{
-  courses: ["COURSE1", "COURSE2", "COURSE3"],
-  count: 2
-}
-```
-
-Meaning:
-
-```text
-take at least 2 courses from the list
-```
-
-Common patterns:
-
-| Pattern              | Representation                           |
-| -------------------- | ---------------------------------------- |
-| required course      | `{ courses: ["A"], count: 1 }`           |
-| A OR B               | `{ courses: ["A", "B"], count: 1 }`      |
-| choose 2 of 3        | `{ courses: ["A", "B", "C"], count: 2 }` |
-| all courses required | `{ courses: ["A", "B", "C"], count: 3 }` |
-
-### 4. Elective leaf node
-
-Represents electives defined by department code and course level.
-
-```javascript
-{
-  elective: {
-    code: "MATH",
-    level: 3000
+  "summary": {
+    "remainingBucketCount": 4,
+    "totalRemainingCourseCount": 6
   },
-  count: 2
-}
-```
-
-Meaning:
-
-```text
-take 2 MATH courses numbered 3000 or above
-```
-
----
-
-## node Grammar
-
-Formally, the node schema is:
-
-```text
-node =
-    { type: "and", nodes: node[] }
-  | { type: "or", nodes: node[] }
-  | { courses: string[], count: number }
-  | { elective: { code: string, level: number }, count: number }
-```
-
----
-
-## Tree Structure
-
-nodes form a tree, where:
-
-- **internal nodes** are logical operators (`and`, `or`)
-- **leaf nodes** represent course / elective constraints
-
-Example:
-
-```text
-OR
-├── AND
-│   ├── courses: [MATH1012, MATH1013], count: 1
-│   └── courses: [MATH1014, MATH1024], count: 1
-└── courses: [MATH1020], count: 1
-```
-
-This corresponds to:
-
-```text
-(MATH1012 OR MATH1013) AND (MATH1014 OR MATH1024)
-OR
-MATH1020
-```
-
----
-
-## Example Requirement
-
-Example node for a program requirement:
-
-```javascript
-type: "and",
-rules: [
-  { courses: ["MATH2343", "MATH3121", "COMP2611"], count: 3 },
-  { courses: ["COMP3711", "COMP3711H"], count: 1 },
-  {
-    type: "or",
-    rules: [
-      { courses: ["COMP2011", "COMP2012"], count: 2 },
+  "remaining": {
+    "school": [],
+    "major": [
       {
-        type: "and",
-        rules: [
-          { courses: ["COMP2012H"], count: 1 },
-          {
-            courses: [
-              "COMP3031",
-              "COMP3111",
-              "COMP3111H",
-              "COMP3211",
-              "COMP3311",
-              "COMP3511",
-            ],
-            count: 1,
-          },
-        ],
-      },
-    ],
+        "id": "major.core.real",
+        "label": "Core: Real analysis",
+        "kind": "course-options",
+        "remainingCount": 1,
+        "options": ["MATH3033", "MATH3043"]
+      }
+    ]
   },
-  {
-    elec: {
-      code: "MATH",
-      lvl: 3000,
-    },
-    count: 1,
-  },
-  {
-    courses: [
-      "MATH2001",
-      "MATH2411",
-      "MATH2421",
-      "MATH2431",
-      "MATH3312",
-      "MATH3322",
-      "MATH3332",
-      "MATH3343",
-      "MATH4023",
-      "MATH4141",
-      "MATH4223",
-      "MATH4321",
-      "MATH4343",
-    ],
-    count: 2,
-  },
-  {
-    elec: {
-      code: "COMP",
-      lvl: 4000,
-    },
-    count: 1,
-  },
-],
+  "recommendations": [
+    {
+      "id": "major.core.real",
+      "label": "Core: Real analysis",
+      "remainingCount": 1,
+      "options": ["MATH3033", "MATH3043"]
+    }
+  ]
+}
 ```
 
-This encodes the requirement:
+## Data Sources
 
-```text
-(MATH2343) AND (MATH3121) AND (COMP2611)
-AND
-(COMP3711 OR COMP3711H)
-AND
-(
-  COMP2011 AND COMP2012
-  OR
-  COMP2012H + one COMP elective
-)
-AND
-(MATH3000+ elective) AND (two MATH electives) AND (COMP4000+ elective)
-```
+All requirement data is currently local and code-defined.
 
----
+- `src/requirements/22-23/science/SREQ.js`
+  - School-level Science requirements used by the evaluator
+  - Includes common COMP requirement, common LANG requirement, foundation lecture buckets, and foundation lab bucket
+- `src/requirements/22-23/science/math.js`
+  - Current major-requirement definition used by the evaluator
+  - The exported structure at the bottom of the file is the active one
+  - Right now the evaluator is implemented for `math-cs`
+- `src/requirements/course_equivalents.js`
+  - Normalizes transcript course codes before evaluation
+  - Example: `LANG2010H` counts as `LANG2010`, `CHEM1020` counts as `CHEM1011`
 
-assumptions:
+The requirement files were manually encoded from HKUST requirement references, noted in comments inside those files. There is no database and no live external fetch.
 
-requirements no matter the year will always contain latest course names (i.e. if in past course was called chem1020, and now is called chem1051, student's transcript may contain chem1020 however requirements will have updated courses name chem1051 always even those requirements were at the time when new name wasn't existing)
+## Storage Model
 
-new name is the source of truth and student transcript will allways be normalized to new names
+The backend does not persist user data.
+
+- Uploaded PDFs are processed in memory.
+- Parsed transcript objects are returned to the client only.
+- Requirement evaluation is computed from the request payload only.
+
+## Requirement Evaluation Notes
+
+`src/services/evalRem.js` currently does four things:
+
+1. Flattens all semester course arrays into a single deduplicated course list.
+2. Applies course equivalence normalization from `course_equivalents.js`.
+3. Evaluates school-level requirements from `SREQ.js`.
+4. Evaluates major requirements and elective buckets from `math.js`.
+
+Major elective matching uses bipartite matching so one taken course is not reused across multiple elective buckets.
+
+## Current Limitations
+
+- Remaining-requirement evaluation is currently implemented for `science` / `math-cs`.
+- `/api/parse` expects transcript formatting close to the current HKUST transcript PDF layout.
+- There is no authentication, database, or file storage.
