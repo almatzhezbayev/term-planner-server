@@ -10,24 +10,28 @@ const pdfBodyParser = express.raw({
   type: ["application/pdf", "application/octet-stream"],
   limit: "10mb",
 });
-const allowedOrigins = (process.env.FRONTEND_ORIGIN || "http://localhost:3000")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const environment = process.env.ENVIRONMENT || "dev";
+const allowedOrigin =
+  environment === "prod"
+    ? process.env.FRONTEND_ORIGIN_PROD
+    : process.env.FRONTEND_ORIGIN_DEV;
+
+const corsOptions = {
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  origin(origin, callback) {
+    if (!origin || origin === allowedOrigin) {
+      callback(null, true);
+      return;
+    }
+
+    callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+};
 
 app.use(express.json());
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(new Error(`CORS blocked for origin: ${origin}`));
-    },
-  }),
-);
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.post("/api/parse", pdfBodyParser, async (req, res) => {
   try {
