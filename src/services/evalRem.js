@@ -56,12 +56,14 @@ const matchElectiveSlots = (courses, slots) => {
 };
 
 const setToSortedArray = (set) => [...set].sort();
+const sum = (numbers) => numbers.reduce((total, value) => total + value, 0);
 
-// const normalizeCourses = (courses) =>
-//   [...new Set(courses.map((course) => courseAliases[course] ?? course))];
-const normalizeCourses = (courses) => [
-  ...new Set(courses.map((course) => course)),
-];
+const normalizeUniqueCourses = (courses) => [...new Set(courses)];
+
+// const normalizeMajorCourses = (courses) =>
+//   normalizeUniqueCourses(
+//     courses.map((course) => courseAliases[course] ?? course),
+//   );
 
 const evalMajor = (courses, req) => {
   const progress = {
@@ -71,7 +73,7 @@ const evalMajor = (courses, req) => {
     electives: structuredClone(req.electiveNeeds),
   };
 
-  const uniqueCourses = normalizeCourses(courses);
+  const uniqueCourses = normalizeUniqueCourses(courses);
   const takenSet = new Set(uniqueCourses);
   const used = new Set();
 
@@ -189,7 +191,7 @@ const evalMajor = (courses, req) => {
 
 const evalSchool = (courses, SREQ) => {
   const progress = structuredClone(SREQ);
-  const uniqueCourses = normalizeCourses(courses);
+  const uniqueCourses = normalizeUniqueCourses(courses);
 
   for (const course of uniqueCourses) {
     if (progress.COMP.size !== 0 && progress.COMP.has(course)) {
@@ -218,6 +220,162 @@ const evalSchool = (courses, SREQ) => {
   }
 
   return progress;
+};
+
+const COMMON_CORE_BUCKET_ORDER = ["hmw", "eComm", "cComm", "A", "H", "T", "SA"];
+
+const COMMON_CORE_BUCKET_LABELS = {
+  hmw: "Common core: Habits, Mindsets, and Wellness",
+  eComm: "Common core: English Communication",
+  cComm: "Common core: Chinese Communication",
+  A: "Common core: Arts",
+  H: "Common core: Humanities",
+  T: "Common core: Technology",
+  SA: "Common core: Social Analysis",
+};
+
+const normalizeCommonCoreCourse = (course, req) => {
+  let normalized = course.trim().toUpperCase();
+
+  if (/^CORE\d{4}[A-Z]$/.test(normalized)) {
+    normalized = normalized.slice(0, 8);
+  }
+
+  return req.legacyAliases[normalized] ?? normalized;
+};
+
+const buildCommonCoreAvailableOptions = (req, bucket, takenCourses) =>
+  Object.entries(req.courseCatalog)
+    .filter(
+      ([course, info]) =>
+        info.buckets.includes(bucket) && !takenCourses.has(course),
+    )
+    .map(([course]) => course)
+    .sort();
+
+const evalCommonCore = (courses, req) => {
+  const required = COMMON_CORE_BUCKET_ORDER.map(
+    (bucket) => req.requiredCredits[bucket] ?? 0,
+  );
+
+  const takenCourses = new Set(
+    normalizeUniqueCourses(
+      courses.map((course) => normalizeCommonCoreCourse(course, req)),
+    ),
+  );
+
+  const eligibleCourses = [...takenCourses]
+    .filter((course) => req.courseCatalog[course])
+    .map((course) => ({
+      code: course,
+      credits: req.courseCatalog[course].credits,
+      buckets: req.courseCatalog[course].buckets.filter((bucket) =>
+        COMMON_CORE_BUCKET_ORDER.includes(bucket),
+      ),
+    }))
+    .filter((course) => course.buckets.length > 0);
+
+  let states = new Map();
+  states.set("0|0|0|0|0|0|0", {
+    earned: Array(COMMON_CORE_BUCKET_ORDER.length).fill(0),
+    score: 0,
+    assignments: {},
+  });
+
+  for (const course of eligibleCourses) {
+    const nextStates = new Map(states);
+
+    for (const state of states.values()) {
+      for (const bucket of course.buckets) {
+        const bucketIndex = COMMON_CORE_BUCKET_ORDER.indexOf(bucket);
+        const nextEarned = [...state.earned];
+
+        nextEarned[bucketIndex] = Math.min(
+          required[bucketIndex],
+          nextEarned[bucketIndex] + course.credits,
+        );
+
+        const key = nextEarned.join("|");
+        const score = sum(nextEarned);
+        const existing = nextStates.get(key);
+
+        if (!existing || score > existing.score) {
+          nextStates.set(key, {
+            earned: nextEarned,
+            score,
+            assignments: {
+              ...state.assignments,
+              [bucket]: [...(state.assignments[bucket] ?? []), course.code],
+            },
+          });
+        }
+      }
+    }
+
+    states = nextStates;
+  }
+
+  let bestState = null;
+
+  for (const state of states.values()) {
+    if (!bestState || state.score > bestState.score) {
+      bestState = state;
+    }
+  }
+
+  const earnedCredits = Object.fromEntries(
+    COMMON_CORE_BUCKET_ORDER.map((bucket, index) => [
+      bucket,
+      bestState?.earned[index] ?? 0,
+    ]),
+  );
+
+  const assignments = Object.fromEntries(
+    COMMON_CORE_BUCKET_ORDER.map((bucket) => [
+      bucket,
+      bestState?.assignments[bucket] ?? [],
+    ]),
+  );
+
+  return {
+    earnedCredits,
+    assignments,
+    takenCourses,
+    requiredCredits: req.requiredCredits,
+  };
+};
+
+const commonCoreCategoriesFromProgress = (progress, req) => {
+  const categories = [];
+
+  for (const bucket of COMMON_CORE_BUCKET_ORDER) {
+    const requiredCredits = req.requiredCredits[bucket] ?? 0;
+    const earnedCredits = progress.earnedCredits[bucket] ?? 0;
+    const remainingCredits = Math.max(requiredCredits - earnedCredits, 0);
+
+    if (remainingCredits === 0) continue;
+
+    const countedCourses = progress.assignments[bucket] ?? [];
+
+    categories.push({
+      id: `commonCore.${bucket}`,
+      label: COMMON_CORE_BUCKET_LABELS[bucket],
+      kind: "course-options",
+      remainingCount: remainingCredits,
+      options: buildCommonCoreAvailableOptions(
+        req,
+        bucket,
+        progress.takenCourses,
+      ),
+      rule: `Need ${requiredCredits} credit(s) in this common core area.`,
+      note:
+        countedCourses.length > 0
+          ? `Counted so far: ${earnedCredits}/${requiredCredits} credits via ${countedCourses.join(", ")}.`
+          : `Counted so far: ${earnedCredits}/${requiredCredits} credits.`,
+    });
+  }
+
+  return categories;
 };
 
 const majorCategoriesFromProgress = (progress, req) => {
@@ -422,6 +580,7 @@ function evalRem({ courses, admitTerm, school, major }) {
   const reqYear = admitTerm.slice(0, -1);
   const schoolReq = require(`../requirements/${reqYear}/${school}/SREQ`);
   const majorReq = require(`../requirements/${reqYear}/${school}/math`);
+  const commonCoreReq = require(`../requirements/${reqYear}/${school}/cc_sci`);
 
   if (major !== "math-cs") {
     throw new Error(
@@ -430,22 +589,32 @@ function evalRem({ courses, admitTerm, school, major }) {
   }
 
   const schoolProgress = evalSchool(courses, schoolReq);
+  const commonCoreProgress = evalCommonCore(courses, commonCoreReq);
   const majorProgress = evalMajor(courses, majorReq);
 
   const schoolCategories = schoolCategoriesFromProgress(schoolProgress);
+  const commonCoreCategories = commonCoreCategoriesFromProgress(
+    commonCoreProgress,
+    commonCoreReq,
+  );
   const majorCategories = majorCategoriesFromProgress(majorProgress, majorReq);
-  const categories = [...schoolCategories, ...majorCategories];
+  const categories = [
+    ...schoolCategories,
+    ...commonCoreCategories,
+    ...majorCategories,
+  ];
 
   return {
     summary: {
       remainingBucketCount: categories.length,
       totalRemainingCourseCount: categories.reduce(
-        (sum, category) => sum + category.remainingCount,
+        (total, category) => total + category.remainingCount,
         0,
       ),
     },
     remaining: {
       school: schoolCategories,
+      commonCore: commonCoreCategories,
       major: majorCategories,
     },
     recommendations: buildRecommendations(categories),

@@ -71,6 +71,7 @@ Evaluates remaining requirements from already parsed or user-edited transcript d
   },
   "remaining": {
     "school": [],
+    "commonCore": [],
     "major": [
       {
         "id": "major.core.real",
@@ -103,6 +104,9 @@ All requirement data is currently local and code-defined.
   - Current major-requirement definition used by the evaluator
   - The exported structure at the bottom of the file is the active one
   - Right now the evaluator is implemented for `math-cs`
+- `src/requirements/22-23/science/cc_sci.js`
+  - Science common-core requirements for the 30-credit curriculum
+  - Includes required credit buckets, eligible course catalog, and legacy `CORE` aliases
 - `src/requirements/course_equivalents.js`
   - Normalizes transcript course codes before evaluation
   - Example: `LANG2010H` counts as `LANG2010`, `CHEM1020` counts as `CHEM1011`
@@ -124,7 +128,8 @@ The backend does not persist user data.
 1. Flattens all semester course arrays into a single deduplicated course list.
 2. Applies course equivalence normalization from `course_equivalents.js`.
 3. Evaluates school-level requirements from `SREQ.js`.
-4. Evaluates major requirements and elective buckets from `math.js`.
+4. Evaluates science common core credit buckets from `cc_sci.js`.
+5. Evaluates major requirements and elective buckets from `math.js`.
 
 Major elective matching uses bipartite matching so one taken course is not reused across multiple elective buckets.
 
