@@ -65,7 +65,7 @@ app.post("/api/requirements", async (req, res) => {
       school,
       major,
     });
-    console.log(JSON.stringify(requirements, null, 2));
+    // console.log(JSON.stringify(requirements, null, 2));
     res.json(requirements);
   } catch (err) {
     res.status(500).json({

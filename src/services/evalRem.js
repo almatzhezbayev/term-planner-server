@@ -1,4 +1,5 @@
 const courseAliases = require("../requirements/course_equivalents");
+const { getSchoolCatalog, getProgramCatalog } = require("../requirements/catalog");
 
 const pickTaken = (options, takenSet) => {
   for (const course of options) {
@@ -185,6 +186,244 @@ const evalMajor = (courses, req) => {
       progress.electives[slots[i].key] -= 1;
     }
   }
+
+  return progress;
+};
+
+const evalPhysicsMajor = (courses, req) => {
+  const progress = {
+    prereq: structuredClone(req.prereq),
+    required: structuredClone(req.required),
+    groupedNeeds: structuredClone(req.groupedNeeds),
+  };
+
+  const uniqueCourses = normalizeUniqueCourses(courses);
+  const takenSet = new Set(uniqueCourses);
+
+  for (const key of Object.keys(progress.prereq)) {
+    const taken = pickTaken(req.prereq[key], takenSet);
+    if (taken) {
+      progress.prereq[key].clear();
+    }
+  }
+
+  if (takenSet.has("MATH1020")) {
+    progress.required.calcI.clear();
+    progress.required.calcII.clear();
+    progress.required.acceleratedCalc.clear();
+  } else {
+    const calcI = pickTaken(req.required.calcI, takenSet);
+    const calcII = pickTaken(req.required.calcII, takenSet);
+
+    if (calcI) progress.required.calcI.clear();
+    if (calcII) progress.required.calcII.clear();
+  }
+
+  for (const key of [
+    "physLabI",
+    "physLabII",
+    "modernPhysics",
+    "modernPhysicsLab",
+    "seminarI",
+    "mathMethodsI",
+    "classicalMechanics",
+    "emI",
+    "qmI",
+    "computationalMethods",
+    "experimentalMethodsI",
+    "experimentalMethodsII",
+    "thermoStat",
+    "seminarII",
+    "capstone",
+    "multivar",
+    "linear",
+    "lang",
+  ]) {
+    const taken = pickTaken(req.required[key], takenSet);
+    if (taken) {
+      progress.required[key].clear();
+    }
+  }
+
+  const contemporaryApplicationsTaken = uniqueCourses.filter((course) =>
+    req.groupedPools.contemporaryApplications.has(course),
+  ).length;
+
+  progress.groupedNeeds.contemporaryApplicationsNeed = Math.max(
+    req.groupedNeeds.contemporaryApplicationsNeed - contemporaryApplicationsTaken,
+    0,
+  );
+
+  return progress;
+};
+
+const evalChemistryMajor = (courses, req) => {
+  const progress = {
+    prereq: structuredClone(req.prereq),
+    required: structuredClone(req.required),
+    electiveNeeds: structuredClone(req.electiveNeeds),
+    capstoneDirectDone: false,
+    capstoneIreCount: 0,
+  };
+
+  const uniqueCourses = normalizeUniqueCourses(courses);
+  const takenSet = new Set(uniqueCourses);
+  const used = new Set();
+
+  for (const key of Object.keys(progress.prereq)) {
+    const taken = pickTaken(req.prereq[key], takenSet);
+    if (taken) {
+      progress.prereq[key].clear();
+      used.add(taken);
+    }
+  }
+
+  for (const key of Object.keys(progress.required)) {
+    const taken = pickTaken(req.required[key], takenSet);
+    if (taken) {
+      progress.required[key].clear();
+      used.add(taken);
+    }
+  }
+
+  const capstoneDirect = pickTaken(req.groupedOptions.capstoneDirect, takenSet);
+  if (capstoneDirect) {
+    progress.capstoneDirectDone = true;
+    used.add(capstoneDirect);
+  } else {
+    progress.capstoneIreCount = uniqueCourses.filter((course) =>
+      req.groupedOptions.capstoneIre.has(course),
+    ).length;
+
+    for (const course of uniqueCourses) {
+      if (req.groupedOptions.capstoneIre.has(course)) {
+        used.add(course);
+      }
+    }
+  }
+
+  const remainingPool = uniqueCourses.filter((course) => !used.has(course));
+
+  for (const course of remainingPool) {
+    if (
+      progress.electiveNeeds.chem3000PlusNeed > 0 &&
+      isSubjectLevel(course, "CHEM", 3000)
+    ) {
+      progress.electiveNeeds.chem3000PlusNeed -= 1;
+      continue;
+    }
+
+    if (
+      progress.electiveNeeds.science2000PlusNeed > 0 &&
+      req.scienceSubjects.some((subject) => isSubjectLevel(course, subject, 2000))
+    ) {
+      progress.electiveNeeds.science2000PlusNeed -= 1;
+    }
+  }
+
+  return progress;
+};
+
+const electiveCreditsForCourse = (course, rule) => {
+  for (const subrule of rule.rules) {
+    if (subrule.type === "course-map" && subrule.courses[course] != null) {
+      return subrule.courses[course];
+    }
+
+    if (
+      subrule.type === "subject-level" &&
+      isSubjectLevel(course, subrule.subject, subrule.minLevel)
+    ) {
+      return subrule.courses?.[course] ?? subrule.defaultCredits ?? 0;
+    }
+  }
+
+  return 0;
+};
+
+const evaluateLifeSciencePath = (courses, req, path, usedCourses) => {
+  const takenSet = new Set(courses);
+  const missingGroups = [];
+  const capstoneUsed = new Set();
+  let startedGroups = 0;
+
+  for (const group of path.groups) {
+    const taken = pickTaken(group.options, takenSet);
+
+    if (taken) {
+      capstoneUsed.add(taken);
+      startedGroups += 1;
+    } else {
+      missingGroups.push(group);
+    }
+  }
+
+  const remainingElectivePool = courses.filter(
+    (course) => !usedCourses.has(course) && !capstoneUsed.has(course),
+  );
+  const earnedElectiveCredits = remainingElectivePool.reduce(
+    (total, course) => total + electiveCreditsForCourse(course, req.electiveRule),
+    0,
+  );
+
+  return {
+    path,
+    missingGroups,
+    capstoneUsed,
+    startedGroups,
+    earnedElectiveCredits,
+    remainingElectiveCredits: Math.max(
+      path.electiveCreditsRequired - earnedElectiveCredits,
+      0,
+    ),
+  };
+};
+
+const chooseBestLifeSciencePath = (pathEvaluations) =>
+  [...pathEvaluations].sort((a, b) => {
+    if (a.missingGroups.length !== b.missingGroups.length) {
+      return a.missingGroups.length - b.missingGroups.length;
+    }
+
+    if (a.startedGroups !== b.startedGroups) {
+      return b.startedGroups - a.startedGroups;
+    }
+
+    return a.remainingElectiveCredits - b.remainingElectiveCredits;
+  })[0];
+
+const evalLifeScienceMajor = (courses, req) => {
+  const progress = {
+    prereq: structuredClone(req.prereq),
+    required: structuredClone(req.required),
+    pathEvaluations: [],
+    selectedPath: null,
+  };
+
+  const uniqueCourses = normalizeUniqueCourses(courses);
+  const takenSet = new Set(uniqueCourses);
+  const used = new Set();
+
+  for (const [key, config] of Object.entries(req.prereq)) {
+    const taken = pickTaken(config.options, takenSet);
+    if (taken) {
+      progress.prereq[key].options.clear();
+      used.add(taken);
+    }
+  }
+
+  for (const [key, config] of Object.entries(req.required)) {
+    const taken = pickTaken(config.options, takenSet);
+    if (taken) {
+      progress.required[key].options.clear();
+      used.add(taken);
+    }
+  }
+
+  progress.pathEvaluations = req.completionPaths.map((path) =>
+    evaluateLifeSciencePath(uniqueCourses, req, path, used),
+  );
+  progress.selectedPath = chooseBestLifeSciencePath(progress.pathEvaluations);
 
   return progress;
 };
@@ -513,6 +752,264 @@ const majorCategoriesFromProgress = (progress, req) => {
   return categories;
 };
 
+const physicsMajorCategoriesFromProgress = (progress, req) => {
+  const categories = [];
+
+  const prereqLabels = {
+    physicsI: "Prerequisite: Physics I",
+    physicsII: "Prerequisite: Physics II",
+  };
+
+  for (const [key, label] of Object.entries(prereqLabels)) {
+    if (progress.prereq[key].size > 0) {
+      categories.push({
+        id: `major.prereq.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.prereq[key]),
+      });
+    }
+  }
+
+  if (
+    progress.required.acceleratedCalc.size > 0 &&
+    (progress.required.calcI.size > 0 || progress.required.calcII.size > 0)
+  ) {
+    if (progress.required.calcI.size > 0) {
+      categories.push({
+        id: "major.required.calcI",
+        label: "Required: Calculus I",
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.required.calcI),
+      });
+    }
+
+    if (progress.required.calcII.size > 0) {
+      categories.push({
+        id: "major.required.calcII",
+        label: "Required: Calculus II",
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.required.calcII),
+      });
+    }
+
+    categories.push({
+      id: "major.required.acceleratedCalc",
+      label: "Alternative required: Accelerated calculus",
+      kind: "course-options",
+      remainingCount: 1,
+      options: setToSortedArray(progress.required.acceleratedCalc),
+      note: "MATH1020 satisfies both the Calculus I and Calculus II requirements.",
+    });
+  }
+
+  const requiredLabels = {
+    physLabI: "Required: Physics lab I",
+    physLabII: "Required: Physics lab II",
+    modernPhysics: "Required: Modern physics",
+    modernPhysicsLab: "Required: Modern physics laboratory",
+    seminarI: "Required: Physics seminar and tutorial I",
+    mathMethodsI: "Required: Mathematical methods in physics I",
+    classicalMechanics: "Required: Classical mechanics",
+    emI: "Required: Electricity and magnetism I",
+    qmI: "Required: Quantum mechanics I",
+    computationalMethods: "Required: Computational methods in physics",
+    experimentalMethodsI: "Required: Methods of experimental physics I",
+    experimentalMethodsII: "Required: Methods of experimental physics II",
+    thermoStat: "Required: Thermodynamics and statistical physics",
+    seminarII: "Required: Physics seminar and tutorial II",
+    capstone: "Required: Physics capstone",
+    multivar: "Required: Multivariable calculus",
+    linear: "Required: Linear algebra",
+    lang: "Required: Advanced language course",
+  };
+
+  for (const [key, label] of Object.entries(requiredLabels)) {
+    if (progress.required[key].size > 0) {
+      categories.push({
+        id: `major.required.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.required[key]),
+      });
+    }
+  }
+
+  if (progress.groupedNeeds.contemporaryApplicationsNeed > 0) {
+    categories.push({
+      id: "major.grouped.contemporaryApplications",
+      label: "Required: Contemporary applications of physics",
+      kind: "course-options",
+      remainingCount: progress.groupedNeeds.contemporaryApplicationsNeed,
+      options: setToSortedArray(req.groupedPools.contemporaryApplications),
+      rule: "Take any 2 courses from PHYS4811, PHYS4812, PHYS4813, and PHYS4814.",
+    });
+  }
+
+  return categories;
+};
+
+const chemistryMajorCategoriesFromProgress = (progress) => {
+  const categories = [];
+
+  const prereqLabels = {
+    chemI: "Prerequisite: General Chemistry I",
+    chemII: "Prerequisite: General Chemistry II",
+  };
+
+  for (const [key, label] of Object.entries(prereqLabels)) {
+    if (progress.prereq[key].size > 0) {
+      categories.push({
+        id: `major.prereq.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.prereq[key]),
+      });
+    }
+  }
+
+  const requiredLabels = {
+    chemLabI: "Required: Laboratory for General Chemistry I",
+    chemLabII: "Required: Laboratory for General Chemistry II",
+    organicI: "Required: Organic Chemistry I",
+    inorganicI: "Required: Inorganic Chemistry I",
+    analytical: "Required: Fundamentals of Analytical Chemistry",
+    mathMethods: "Required: Mathematical Methods for Physical Chemistry",
+    physicalI: "Required: Physical Chemistry I",
+    synthLabI: "Required: Synthetic Chemistry Laboratory I",
+    characterizationLabI:
+      "Required: Molecular Characterization Chemistry Laboratory I",
+    organicII: "Required: Organic Chemistry II",
+    inorganicII: "Required: Inorganic Chemistry II",
+    instrumental: "Required: Instrumental Analysis",
+    physicalII: "Required: Physical Chemistry II",
+    synthLabII: "Required: Synthetic Chemistry Laboratory II",
+    characterizationLabII:
+      "Required: Molecular Characterization Chemistry Laboratory II",
+    calculus: "Required: Calculus",
+    lang: "Required: Science Communication in English",
+  };
+
+  for (const [key, label] of Object.entries(requiredLabels)) {
+    if (progress.required[key].size > 0) {
+      categories.push({
+        id: `major.required.${key}`,
+        label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(progress.required[key]),
+      });
+    }
+  }
+
+  if (!progress.capstoneDirectDone && progress.capstoneIreCount < 2) {
+    categories.push({
+      id: "major.grouped.capstone",
+      label: "Required: Chemistry capstone or IRE project sequence",
+      kind: "course-options",
+      remainingCount: progress.capstoneIreCount > 0 ? 1 : 2,
+      options: ["CHEM4689", "CHEM4691", "SCIE3500", "SCIE4500"],
+      rule: "Take CHEM4689 or CHEM4691, or take both SCIE3500 and SCIE4500.",
+      note:
+        progress.capstoneIreCount > 0
+          ? `IRE path progress: ${progress.capstoneIreCount}/2 courses completed.`
+          : undefined,
+    });
+  }
+
+  if (progress.electiveNeeds.chem3000PlusNeed > 0) {
+    categories.push({
+      id: "major.elective.chem3000Plus",
+      label: "CHEM elective at 3000-level or above",
+      kind: "count-only",
+      remainingCount: progress.electiveNeeds.chem3000PlusNeed,
+      rule: "Any CHEM course numbered 3000 or above. Chemistry Option and IRE Track students are exempt from this requirement.",
+    });
+  }
+
+  if (progress.electiveNeeds.science2000PlusNeed > 0) {
+    categories.push({
+      id: "major.elective.science2000Plus",
+      label: "Science elective at 2000-level or above",
+      kind: "count-only",
+      remainingCount: progress.electiveNeeds.science2000PlusNeed,
+      rule: "Any School of Science course numbered 2000 or above. The source requirement is 2 credits minimum.",
+    });
+  }
+
+  return categories;
+};
+
+const lifeScienceMajorCategoriesFromProgress = (progress, req) => {
+  const categories = [];
+
+  for (const [key, config] of Object.entries(progress.prereq)) {
+    if (config.options.size > 0) {
+      categories.push({
+        id: `major.prereq.${key}`,
+        label: req.prereq[key].label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(config.options),
+      });
+    }
+  }
+
+  for (const [key, config] of Object.entries(progress.required)) {
+    if (config.options.size > 0) {
+      categories.push({
+        id: `major.required.${key}`,
+        label: req.required[key].label,
+        kind: "course-options",
+        remainingCount: 1,
+        options: setToSortedArray(config.options),
+      });
+    }
+  }
+
+  const selectedPath = progress.selectedPath;
+
+  if (selectedPath?.missingGroups.length > 0) {
+    categories.push({
+      id: "major.grouped.capstone",
+      label: `Required: ${selectedPath.path.label}`,
+      kind: "course-options",
+      remainingCount: selectedPath.missingGroups.length,
+      options: selectedPath.missingGroups.flatMap((group) =>
+        setToSortedArray(group.options),
+      ),
+      rule: selectedPath.missingGroups
+        .map(
+          (group) =>
+            `${group.label}: ${setToSortedArray(group.options).join(" or ")}`,
+        )
+        .join(". "),
+      note:
+        progress.pathEvaluations.length > 1
+          ? `Evaluator selected the ${selectedPath.path.label.toLowerCase()} path based on your current transcript progress.`
+          : undefined,
+    });
+  }
+
+  if (selectedPath && selectedPath.remainingElectiveCredits > 0) {
+    categories.push({
+      id: "major.elective.lifeScience",
+      label: req.electiveRule.label,
+      kind: "count-only",
+      remainingCount: selectedPath.remainingElectiveCredits,
+      rule: req.electiveRule.note,
+      note: `${selectedPath.earnedElectiveCredits}/${selectedPath.path.electiveCreditsRequired} elective credit(s) counted for the selected ${selectedPath.path.label.toLowerCase()} path.`,
+    });
+  }
+
+  return categories;
+};
+
 const schoolCategoriesFromProgress = (progress) => {
   const categories = [];
 
@@ -578,26 +1075,68 @@ const buildRecommendations = (categories) =>
 
 function evalRem({ courses, admitTerm, school, major }) {
   const reqYear = admitTerm.slice(0, -1);
-  const schoolReq = require(`../requirements/${reqYear}/${school}/SREQ`);
-  const majorReq = require(`../requirements/${reqYear}/${school}/math`);
-  const commonCoreReq = require(`../requirements/${reqYear}/${school}/cc_sci`);
+  const schoolCatalog = getSchoolCatalog(reqYear, school);
 
-  if (major !== "math-cs") {
+  if (!schoolCatalog) {
     throw new Error(
-      `Remaining-requirement evaluation is currently implemented for major '${major}' only.`,
+      `Remaining-requirement evaluation is currently not implemented for school '${school}' in '${reqYear}'.`,
     );
   }
 
+  const programCatalog = getProgramCatalog({ reqYear, school, major });
+
+  if (!programCatalog) {
+    throw new Error(
+      `Remaining-requirement evaluation is currently not implemented for major '${major}'.`,
+    );
+  }
+
+  const schoolReq = require(
+    `../requirements/${reqYear}/${school}/${schoolCatalog.files.school}`,
+  );
+  const commonCoreReq = require(
+    `../requirements/${reqYear}/${school}/${schoolCatalog.files.commonCore}`,
+  );
+  const majorReq = require(
+    `../requirements/${reqYear}/${school}/${programCatalog.requirementFile}`,
+  );
+
   const schoolProgress = evalSchool(courses, schoolReq);
   const commonCoreProgress = evalCommonCore(courses, commonCoreReq);
-  const majorProgress = evalMajor(courses, majorReq);
+  const majorEvaluators = {
+    "math-cs": {
+      evaluate: evalMajor,
+      buildCategories: majorCategoriesFromProgress,
+    },
+    physics: {
+      evaluate: evalPhysicsMajor,
+      buildCategories: physicsMajorCategoriesFromProgress,
+    },
+    chemistry: {
+      evaluate: evalChemistryMajor,
+      buildCategories: chemistryMajorCategoriesFromProgress,
+    },
+    "life-science": {
+      evaluate: evalLifeScienceMajor,
+      buildCategories: lifeScienceMajorCategoriesFromProgress,
+    },
+  };
+  const majorEvaluator = majorEvaluators[programCatalog.evaluator];
+
+  if (!majorEvaluator) {
+    throw new Error(
+      `No evaluator registered for '${programCatalog.evaluator}'.`,
+    );
+  }
+
+  const majorProgress = majorEvaluator.evaluate(courses, majorReq);
 
   const schoolCategories = schoolCategoriesFromProgress(schoolProgress);
   const commonCoreCategories = commonCoreCategoriesFromProgress(
     commonCoreProgress,
     commonCoreReq,
   );
-  const majorCategories = majorCategoriesFromProgress(majorProgress, majorReq);
+  const majorCategories = majorEvaluator.buildCategories(majorProgress, majorReq);
   const categories = [
     ...schoolCategories,
     ...commonCoreCategories,

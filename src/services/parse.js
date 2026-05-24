@@ -1,3 +1,5 @@
+const { detectMajorFromCatalog } = require("../requirements/catalog");
+
 function parse(text) {
   // get admission date fist in a form of 22-23f
   const admitMatch = text.match(
@@ -20,42 +22,27 @@ function parse(text) {
 
   const admitTerm = `${String(startYear).slice(-2)}-${String(startYear + 1).slice(-2)}${term}`;
 
-  // get major
-  const majorMatch = text.match(/Major:\s*([^\n]+)/);
-
-  if (!majorMatch) throw new Error("Major not found");
-
-  const majorText = majorMatch[1].trim();
-
-  const mathTracks = {
-    "Pure Mathematics": "pm",
-    "Pure Mathematics (Advanced)": "pma",
-    "Applied Mathematics": "am",
-    Statistics: "s",
-    "Financial and Actuarial Mathematics": "fam",
-    "Computer Science": "cs",
-    "General Mathematics": "gm",
-  };
-
-  let major = null;
-
-  for (const track in mathTracks) {
-    if (majorText.includes(track)) {
-      major = `math-${mathTracks[track]}`;
-      break;
-    }
-  }
-
-  if (!major) {
-    throw new Error(`Unknown math major: ${majorText}`);
-  }
-
   // get school
   const schoolMatch = text.match(/School of ([A-Za-z]+)/);
 
   if (!schoolMatch) throw new Error("School not found");
 
   const school = schoolMatch[1].toLowerCase();
+
+  // get major
+  const majorMatch = text.match(/Major:\s*([^\n]+)/);
+
+  if (!majorMatch) throw new Error("Major not found");
+
+  const majorText = majorMatch[1].trim();
+  const reqYear = admitTerm.slice(0, -1);
+  const major = detectMajorFromCatalog({ reqYear, school, majorText });
+
+  if (!major) {
+    throw new Error(
+      `Unknown or unsupported major for ${school} ${reqYear}: ${majorText}`,
+    );
+  }
 
   // get courses taken each semester
   const semesterRegex = /(20\d{2}-\d{2})\s+(Fall|Winter|Spring|Summer)/g;
