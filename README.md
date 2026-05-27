@@ -2,6 +2,14 @@
 
 Express backend for transcript parsing and remaining-requirement evaluation.
 
+## Hosted App
+
+The frontend is already hosted here:
+
+`https://term-planner-client.onrender.com/`
+
+The backend is also deployed on Render. It is hosted on the free tier, so after inactivity the service may need some time to spin back up before the first parse or requirement request completes.
+
 ## Run
 
 ```bash
